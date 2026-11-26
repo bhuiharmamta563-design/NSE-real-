@@ -170,18 +170,23 @@ st.caption("Live Option Chain & Zone Analytics")
 def fetch_expiries(inst_key):
     url = f"https://api.upstox.com/v2/option/contract?instrument_key={enc(inst_key)}"
     try:
-        data = requests.get(url, headers=HEADERS).json()
+        resp = requests.get(url, headers=HEADERS, timeout=20)
+        data = resp.json()
         if data.get("status") == "success":
             exp = sorted({i["expiry"] for i in data.get("data", []) if i.get("expiry")})
+            st.session_state["expiry_err"] = None
             return [e for e in exp if e >= str(date.today())]
+        errs = data.get("errors") or []
+        msg = data.get("message") or (errs[0].get("message") if errs and isinstance(errs[0], dict) else None) or f"status={data.get('status')}"
+        st.session_state["expiry_err"] = f"HTTP {resp.status_code}: {msg}"
     except Exception as e:
-        st.error(f"Expiry fetch error: {e}")
+        st.session_state["expiry_err"] = f"exception: {str(e)[:150]}"
     return []
 
 
 expiry_options = fetch_expiries(inst_key)
 if not expiry_options:
-    st.error(f"⚠️ {inst_name} ki expiry dates load nahi hui! Access Token check karein, ya is instrument ke F&O options na hon (ya symbol badal gaya ho, jaise Tata Motors ab TMPV/TMCV).")
+    st.error(f"⚠️ {inst_name} ki expiry dates load nahi hui! Access Token check karein, ya is instrument ke F&O options na hon (ya symbol badal gaya ho, jaise Tata Motors ab TMPV/TMCV). Upstox ka jawab: {st.session_state.get('expiry_err') or '—'}")
     st.stop()
 
 st.sidebar.header("Settings")
