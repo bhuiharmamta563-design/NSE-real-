@@ -211,18 +211,6 @@ st.sidebar.header("Settings")
 expiry_date = st.sidebar.selectbox("Select Expiry Date", expiry_options)
 n_strikes = st.sidebar.slider("ATM ke upar/niche strikes", 5, 30, 10)
 show_summary = st.sidebar.checkbox("Strike ke baad PCR / Zone dikhao", value=True)
-VOLUME_GUIDE_MD = """**VajraAnalytics - Volume ka Mahatva:**
-
-1. **Asli Support aur Resistance:** Highest OI + Highest Volume = Strong Support / Resistance.
-2. **Reversal aur Breakout:** Volume badhne par reversal ya breakout ka confirmation milta hai.
-3. **Trap se Bachav:** Bina volume ke price movement fake/trap ho sakti hai.
-4. **Liquidity:** Zyada volume se orders jaldi execute hote hain aur slippage kam hoti hai.
-
-**Summary:** OI batata hai bade players kahan hain, Volume batata hai activity kitni tezi se ho rahi hai.
-
-*Ye sirf shiksha ke liye hai, trading ki salah nahi.*"""
-with st.sidebar.expander("📘 Volume Guide"):
-    st.markdown(VOLUME_GUIDE_MD)
 def last_trading_days(n=5):
     """Aaj se shuru karke pichhle n weekdays (holidays ka check nahi)."""
     out, d = [], date.today()
