@@ -2721,7 +2721,10 @@ def render_live_nifty_banner():
         pct = change_pct(d["ltp"], d["cp"])
         st.metric("🔴 Nifty LIVE", f"{d['ltp']:,.2f}", f"{pct:+.2f}%" if pct is not None else None)
     else:
-        st.caption(f"🔴 Live feed wait: connected={fc.connected}" + (f" · {fc.last_error}" if fc.last_error else ""))
+        stt = fc.status()
+        st.caption(f"🔴 Live feed: connected={stt['connected']} · attempts={stt['attempts']} · "
+                   f"event={stt['last_event']} · msgs={stt['msgs']}"
+                   + (f" · error={stt['last_error']}" if stt['last_error'] else ""))
 
 
 def render_page():
