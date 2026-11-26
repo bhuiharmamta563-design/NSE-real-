@@ -2649,6 +2649,41 @@ def _add_alert(name, level, direction, tol, inst):
                           "level": float(level), "dir": direction, "tol": float(tol)})
 
 
+def _run_shift():
+    """Callback: naye samay par shifting nikalo (table isi run mein update ho)."""
+    ctx = st.session_state.get("chain_ctx")
+    if not ctx:
+        return
+    cut = st.session_state.get("shift_time", dt_time(9, 16))
+    res = build_shift(ctx["df"], ctx["spot"], ctx["n"], cut)
+    st.session_state["shift"] = {"inst": ctx["inst"], "exp": ctx["exp"], **res}
+
+
+def _clear_shift():
+    st.session_state["shift"] = None
+
+
+def render_shift_section():
+    st.markdown("---")
+    st.subheader("🔀 Shifting")
+    ctx = st.session_state.get("chain_ctx")
+    if not ctx:
+        st.caption("Pehle option chain load hone dein, phir yahan shifting chalegi.")
+        return
+    st.caption("Option chain ke CALLS/PUTS mein shifting dikhega. Us samay se pehle ka data 'purana' maana jayega. Default samay 09:16.")
+    st.time_input("Shifting samay", value=dt_time(9, 16), step=60, key="shift_time")
+    c1, c2 = st.columns(2)
+    c1.button("🔀 Shifting dekho", on_click=_run_shift, key="btn_shift_go")
+    if current_shift():
+        c2.button("❌ Hatao", on_click=_clear_shift, key="btn_shift_clear")
+    sh = st.session_state.get("shift")
+    if sh and sh.get("inst") == ctx["inst"] and sh.get("exp") == ctx["exp"]:
+        if sh.get("error"):
+            st.warning(sh["error"])
+        else:
+            st.caption(f"Shifting {sh['cut']} se {sh['asof']} tak. {sh['n_ok']}/{sh['n_all']} options ki history mili.")
+
+
 def render_alert_panel():
     st.markdown("---")
     st.subheader("🔔 Price alerts")
@@ -2734,9 +2769,9 @@ def render_live_nifty_banner():
             pct_txt = f"{pct:+.2f}%"
         st.markdown(
             f"<div style='display:inline-block;padding:8px 14px;border-radius:10px;border:1px solid {bd};background:{bg};color:{fg}'>"
-            f"<div style='font-size:12px;opacity:.8'>🔴 Nifty LIVE</div>"
-            f"<div style='font-size:26px;font-weight:700;line-height:1.2'>{d['ltp']:,.2f}</div>"
-            f"<div style='font-size:13px;font-weight:600;color:{pc}'>{pct_txt}</div></div>",
+            f"<div style='font-size:14px;font-weight:600;opacity:.85'>🔴 Nifty LIVE</div>"
+            f"<div style='font-size:44px;font-weight:800;line-height:1.1'>{d['ltp']:,.2f}</div>"
+            f"<div style='font-size:18px;font-weight:700;color:{pc}'>{pct_txt}</div></div>",
             unsafe_allow_html=True)
     else:
         stt = fc.status()
@@ -2787,7 +2822,7 @@ def render_page():
 
         # ---- Smart Analysis ----
         st.markdown("---")
-        st.subheader("🧠 Smart Analysis – Supply / Demand Zone (OI + Volume based)")
+        st.subheader("🧠 Smart Analysis")
 
         bias_col = "#dcfce7" if "BULL" in ana["bias"] else "#fee2e2" if "BEAR" in ana["bias"] else "#fef9c3"
         _br = st.session_state.get("breaches") or []
@@ -2807,11 +2842,8 @@ def render_page():
         )
         st.write("")
 
-        bc1, bc2, bc3, bc4 = st.columns(4)
-        pr_click = bc1.button("🧭 Pressure matrix (9:17 se ab tak)")
-        vm_click = bc2.button("📋 Volume matrix (9:17 se ab tak)")
-        rv_click = bc3.button("📈 Volatility (9:17 se ab tak)")
-        ai_click = bc4.button("🤖 AI summary (Gemini / Claude)")
+        # Pressure / Volume / Volatility / AI buttons hata diye gaye hain
+        pr_click = vm_click = rv_click = ai_click = False
         if rv_click and not is_past:
             with st.spinner("Volatility nikal raha hoon..."):
                 st.session_state["rv"] = {"inst": inst_name, "exp": expiry_date, **build_rv(df, spot, n_strikes)}
@@ -2867,24 +2899,6 @@ def render_page():
         ana["pressure_alert"] = pr["support_strike"] if (same and not pr.get("error") and pr.get("alert")) else None
         # ---- Table ----
         st.markdown("---")
-        st.subheader("📋 Complete Option Chain Matrix")
-        _box = st.container(border=True)
-        with _box:
-            sc1, sc2, sc3 = st.columns([1, 1.4, 0.7])
-            cutoff_t = sc1.time_input("Samay", value=dt_time(9, 20), step=60, label_visibility="collapsed", help="Isse pehle ka data 'purana' mana jayega")
-            if sc2.button("🔀 Shifting dekho", disabled=is_past):
-                with st.spinner("Option ki history aa rahi hai (kuch second lagte hain)..."):
-                    res = build_shift(df, spot, n_strikes, cutoff_t)
-                st.session_state["shift"] = {"inst": inst_name, "exp": expiry_date, **res}
-            if current_shift() and sc3.button("❌ Hatao"):
-                st.session_state["shift"] = None
-        sh_state = st.session_state.get("shift")
-        if sh_state and sh_state.get("inst") == inst_name and sh_state.get("exp") == expiry_date:
-            if sh_state.get("error"):
-                st.warning(sh_state["error"])
-            else:
-                st.caption(f"🔀 Shifting {sh_state['cut']} se {sh_state['asof']} tak ki (option chain ke upar CALLS/PUTS mein dikh rahi hai). "
-                           f"{sh_state['n_ok']}/{sh_state['n_all']} options ki history mili. Naya dekhne ke liye button dobara dabayein.")
         if is_past:
             pb1, pb2, pb3, pb4 = st.columns([1, 1, 1.4, 1.6])
             pb1.button("⏮ 1 min", on_click=_shift_past, args=(-1,))
@@ -2892,6 +2906,7 @@ def render_page():
             pb3.button("⏸ Stop" if st.session_state.get("play_on") else "▶ Play", on_click=_toggle_play)
             pb4.selectbox("Speed (sec/min)", [1, 2, 3, 5], index=2, key="play_secs")
             st.caption(f"📅 {chart_day:%d-%m-%Y} · {cur_past_t():%H:%M} tak (pichhla data)")
+        st.session_state["chain_ctx"] = {"df": df, "spot": spot, "n": n_strikes, "inst": inst_name, "exp": expiry_date}
         render_table(df, spot, n_strikes, ana, show_summary, inst_name, min(140 + (2 * n_strikes + 2) * 50, 1100))
 
         # ---- Charts with Supply / Demand zones ----
@@ -3350,3 +3365,6 @@ render_scanner()
 
 
 render_alert_panel()
+
+
+render_shift_section()
