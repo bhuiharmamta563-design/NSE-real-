@@ -2688,10 +2688,25 @@ def get_nifty_feed():
         tok = st.secrets.get("UPSTOX_ANALYTICS_TOKEN") or ACCESS_TOKEN
     except Exception:
         tok = ACCESS_TOKEN
-    r = requests.get("https://api.upstox.com/v3/feed/market-data-feed/authorize",
-                     headers={"Authorization": f"Bearer {tok}", "Accept": "application/json"}, timeout=15).json()
-    url = r["data"]["authorized_redirect_uri"]
-    return FeedClient(url, [FEED_NIFTY_KEY], mode="ltpc")
+    src = "analytics token" if (st.secrets.get("UPSTOX_ANALYTICS_TOKEN") if _has_secret("UPSTOX_ANALYTICS_TOKEN") else None) else "access token"
+    resp = requests.get("https://api.upstox.com/v3/feed/market-data-feed/authorize",
+                        headers={"Authorization": f"Bearer {tok}", "Accept": "application/json"}, timeout=15)
+    try:
+        js = resp.json()
+    except Exception:
+        js = {}
+    if "data" not in js or not (js.get("data") or {}).get("authorized_redirect_uri"):
+        errs = js.get("errors") or []
+        msg = js.get("message") or (errs[0].get("message") if errs and isinstance(errs[0], dict) else None)
+        raise RuntimeError(f"authorize fail ({src}, HTTP {resp.status_code}): {msg or str(js)[:120]}")
+    return FeedClient(js["data"]["authorized_redirect_uri"], [FEED_NIFTY_KEY], mode="ltpc")
+
+
+def _has_secret(name):
+    try:
+        return bool(st.secrets.get(name))
+    except Exception:
+        return False
 
 
 def render_live_nifty_banner():
