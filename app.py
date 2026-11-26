@@ -2719,7 +2719,21 @@ def render_live_nifty_banner():
     d = fc.latest().get(FEED_NIFTY_KEY)
     if d:
         pct = change_pct(d["ltp"], d["cp"])
-        st.metric("🔴 Nifty LIVE", f"{d['ltp']:,.2f}", f"{pct:+.2f}%" if pct is not None else None)
+        dk = _dark()
+        bg = "#0f172a" if dk else "#ffffff"
+        fg = "#e5e7eb" if dk else "#111827"
+        bd = "#334155" if dk else "#e5e7eb"
+        if pct is None:
+            pc, pct_txt = fg, "—"
+        else:
+            pc = ("#4ade80" if pct >= 0 else "#f87171") if dk else ("#15803d" if pct >= 0 else "#b91c1c")
+            pct_txt = f"{pct:+.2f}%"
+        st.markdown(
+            f"<div style='display:inline-block;padding:8px 14px;border-radius:10px;border:1px solid {bd};background:{bg};color:{fg}'>"
+            f"<div style='font-size:12px;opacity:.8'>🔴 Nifty LIVE</div>"
+            f"<div style='font-size:26px;font-weight:700;line-height:1.2'>{d['ltp']:,.2f}</div>"
+            f"<div style='font-size:13px;font-weight:600;color:{pc}'>{pct_txt}</div></div>",
+            unsafe_allow_html=True)
     else:
         stt = fc.status()
         st.caption(f"🔴 Live feed: connected={stt['connected']} · attempts={stt['attempts']} · "
