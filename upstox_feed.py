@@ -130,7 +130,15 @@ class FeedClient:
         self._stop = False
         self.connected = False
         self.last_error = None
+        self.attempts = 0
+        self.last_event = "start"
+        self.msg_count = 0
+        self.last_msg_at = None
         threading.Thread(target=self._run, daemon=True).start()
+
+    def status(self):
+        return {"connected": self.connected, "attempts": self.attempts, "last_event": self.last_event,
+                "msgs": self.msg_count, "last_error": self.last_error}
 
     def latest(self):
         with self._lock:
@@ -142,6 +150,8 @@ class FeedClient:
     def _run(self):
         import websocket  # websocket-client
         while not self._stop:
+            self.attempts += 1
+            self.last_event = f"connecting #{self.attempts}"
             app = websocket.WebSocketApp(self._url, on_open=self._on_open, on_message=self._on_message,
                                          on_error=self._on_error, on_close=self._on_close)
             app.run_forever(ping_interval=20, ping_timeout=10)
@@ -151,6 +161,7 @@ class FeedClient:
     def _on_open(self, ws):
         self.connected = True
         self.last_error = None
+        self.last_event = "open, subscribe bheja"
         # SUBSCRIBE FORMAT: docs ke hisaab se confirm karna hai (binary/text). Yahan JSON bytes bheje ja rahe hain.
         sub = {"guid": "veer-zone-phase1", "method": "sub",
                "data": {"mode": self._mode, "instrumentKeys": self._keys}}
@@ -158,7 +169,10 @@ class FeedClient:
         ws.send(json.dumps(sub).encode("utf-8"), opcode=websocket.ABNF.OPCODE_BINARY)
 
     def _on_message(self, ws, message):
+        self.msg_count += 1
+        self.last_msg_at = time.time()
         if isinstance(message, str):
+            self.last_error = f"text frame: {message[:120]}"
             return
         try:
             data = parse_frame(message)
@@ -170,6 +184,10 @@ class FeedClient:
 
     def _on_error(self, ws, error):
         self.last_error = str(error)[:200]
+        self.last_event = "error"
 
     def _on_close(self, ws, code, msg):
         self.connected = False
+        self.last_event = f"closed code={code} msg={msg}"
+        if code not in (None, 1000):
+            self.last_error = f"closed code={code} msg={str(msg)[:120]}"
