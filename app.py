@@ -2535,6 +2535,10 @@ def render_charts(df, spot, ana, n_strikes, height=440):
                     f"📈 Trend ({_tf_lbl}, {months_s} mahina): <b style='color:{_col}'>{_tr['label']}</b> · {_tr['detail']} · "
                     f"last SH {_shv} / SL {_slv}</div>", unsafe_allow_html=True)
     components.html(zoom_shell_html("price", "-main"), height=height, scrolling=True)
+    # mode sirf tab bhejें jab badle, warna page refresh par chart apne aap price mode mein wapas chala jata
+    _prev_mode = st.session_state.get("_cmode")
+    send_mode = mode if _prev_mode != mode else None
+    st.session_state["_cmode"] = mode
     components.html(push_html("price-main", {"price": price_sets, "vol": vol_sets, "oi": oi_data, "mode": send_mode}), height=0)
     with st.expander("📅 Structure events (SH/SL, BOS, CHoCH)", expanded=False):
         ev_df = structure_events_df(inst_key, months_s)
