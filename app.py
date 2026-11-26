@@ -167,24 +167,42 @@ st.caption("Live Option Chain & Zone Analytics")
 
 # ---------------- Expiry dates (auto) ----------------
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=300)
 def fetch_expiries(inst_key):
+    """Expiry list (5 minute cache). Failure par exception: cache mein nahi jata, agli run mein dobara try hota hai."""
     url = f"https://api.upstox.com/v2/option/contract?instrument_key={enc(inst_key)}"
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=20)
-        data = resp.json()
-        if data.get("status") == "success":
-            exp = sorted({i["expiry"] for i in data.get("data", []) if i.get("expiry")})
-            st.session_state["expiry_err"] = None
-            return [e for e in exp if e >= str(date.today())]
-        errs = data.get("errors") or []
-        msg = data.get("message") or (errs[0].get("message") if errs and isinstance(errs[0], dict) else None) or f"status={data.get('status')}"
-        st.session_state["expiry_err"] = f"HTTP {resp.status_code}: {msg}"
-    except Exception as e:
-        st.session_state["expiry_err"] = f"exception: {str(e)[:150]}"
-    return []
+    last_msg = "koi jawab nahi"
+    for attempt in range(2):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=20)
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+            if data.get("status") == "success":
+                exp = sorted({i["expiry"] for i in data.get("data", []) if i.get("expiry")})
+                out = [e for e in exp if e >= str(date.today())]
+                if out:
+                    return out
+                last_msg = "is instrument ki expiry list khali aayi"
+                break
+            errs = data.get("errors") or []
+            msg = data.get("message") or (errs[0].get("message") if errs and isinstance(errs[0], dict) else None)
+            last_msg = f"HTTP {resp.status_code}: {msg or 'unknown'}"
+            if resp.status_code not in (429, 500, 502, 503, 504):
+                break
+        except Exception as e:
+            last_msg = f"exception: {str(e)[:150]}"
+        time.sleep(1.5)
+    raise RuntimeError(last_msg)
 
 
-expiry_options = fetch_expiries(inst_key)
+try:
+    expiry_options = fetch_expiries(inst_key)
+    st.session_state["expiry_err"] = None
+except Exception as _e:
+    expiry_options = []
+    st.session_state["expiry_err"] = str(_e)[:200]
 if not expiry_options:
     st.error(f"⚠️ {inst_name} ki expiry dates load nahi hui! Access Token check karein, ya is instrument ke F&O options na hon (ya symbol badal gaya ho, jaise Tata Motors ab TMPV/TMCV). Upstox ka jawab: {st.session_state.get('expiry_err') or '—'}")
     st.stop()
