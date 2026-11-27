@@ -163,6 +163,10 @@ else:
 
 st.title(f"📊 Veer Zone Pro · {inst_name}")
 st.caption("Live Option Chain & Zone Analytics")
+if hasattr(st, "fragment"):
+    st.fragment(run_every=0.5)(render_live_nifty_banner)()   # Nifty LIVE: har 0.5 second (WebSocket memory se padhta hai)
+else:
+    render_live_nifty_banner()
 
 
 # ---------------- Expiry dates (auto) ----------------
@@ -232,10 +236,10 @@ show_vol_zones = st.sidebar.checkbox("📊 Volume zones chart par dikhao", value
 show_oi_zones = st.sidebar.checkbox("📈 OI zones chart par dikhao", value=True)
 focus_mode = st.sidebar.checkbox("📺 Focus mode (sirf option chain)", value=False)
 chart_focus = st.sidebar.checkbox("📈 Charts Focus mode (sirf charts)", value=False)
-auto_refresh = st.sidebar.checkbox("🔄 Auto refresh (smooth, screen wahin rahegi)", value=False)
-refresh_secs = 5
+auto_refresh = st.sidebar.checkbox("🔄 Auto refresh (smooth, screen wahin rahegi)", value=True)
+refresh_secs = 1
 if auto_refresh:
-    refresh_secs = st.sidebar.selectbox("Refresh kitne second mein", [1, 2, 3, 4, 5, 10, 15, 30, 60], index=4)
+    refresh_secs = st.sidebar.selectbox("Refresh kitne second mein", [0.8, 1, 2, 3, 4, 5, 10, 15, 30, 60], index=1)
     if refresh_secs < 5:
         st.sidebar.caption("⚠️ 1-4 sec par Upstox ki limit ya slow net se dikkat ho to 5+ rakhein.")
 if st.sidebar.button("🔄 Refresh now"):
@@ -2948,7 +2952,6 @@ def render_live_nifty_banner():
 
 
 def render_page():
-    render_live_nifty_banner()
     df, spot = fetch_option_chain(inst_key, expiry_date)
     if not df.empty and spot:
         render_alert_banner(spot, inst_name)
@@ -3526,7 +3529,7 @@ def render_scanner():
 
 # Auto refresh: sirf data wala hissa dobara bante hai (fragment), poora page nahi, isliye screen smooth rehti hai
 if auto_refresh and hasattr(st, "fragment"):
-    st.fragment(run_every=f"{refresh_secs}s")(render_page)()
+    st.fragment(run_every=float(refresh_secs))(render_page)()
 elif st.session_state.get("play_on") and hasattr(st, "fragment"):
     st.fragment(run_every=f"{int(st.session_state.get('play_secs', 3))}s")(render_page)()
 else:
