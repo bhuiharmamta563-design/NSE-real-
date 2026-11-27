@@ -880,6 +880,26 @@ TABLE_UPDATE_JS = """
 window.__cid = 'table';
 var lastV = null, wrapEl = document.getElementById('wrap');
 var zs = 1, fitMode = false, pinch = null, pts = {};
+var tblHtml = '', tblCompact = false;
+function compactTable(t){
+  Array.prototype.forEach.call(t.querySelectorAll('tr'), function(tr){
+    if (tr.classList.contains('spotrow')) { if (tr.firstElementChild) tr.firstElementChild.colSpan = 7; return; }
+    var c1 = tr.querySelector('th.calls');
+    if (c1) { c1.colSpan = 3; var p1 = tr.querySelector('th.puts'); if (p1) p1.colSpan = 3; return; }
+    var cells = Array.prototype.slice.call(tr.children);
+    var hide = [0, 1, 9];
+    if (cells.length >= 13) hide = hide.concat([10, 11, 12]); else if (cells.length === 11) hide.push(10);
+    hide.sort(function(a, b){ return b - a; }).forEach(function(i){ if (cells[i]) cells[i].parentNode.removeChild(cells[i]); });
+  });
+}
+function tblRenderBody(){
+  var tmp = document.createElement('div'); tmp.innerHTML = tblHtml;
+  if (tblCompact) { var t = tmp.querySelector('table'); if (t) compactTable(t); }
+  wrapEl.innerHTML = tmp.innerHTML;
+  applyZoom();
+}
+var tcmpBtn = document.getElementById('tcmp');
+tcmpBtn.addEventListener('click', function(){ tblCompact = !tblCompact; tcmpBtn.textContent = tblCompact ? '🔁' : '📊'; tblRenderBody(); });
 function natW(t){ t.style.zoom = 1; return t.scrollWidth; }
 function applyZoom(){
   var t = wrapEl.querySelector('table'); if (!t) return;
@@ -908,8 +928,7 @@ document.addEventListener('webkitfullscreenchange', onTableFS);
 window.__update = function(p){
   if (p.v === lastV) return;
   var first = (lastV === null); lastV = p.v;
-  wrapEl.innerHTML = p.html;
-  applyZoom();
+  tblHtml = p.html; tblRenderBody();
   if (first && window.__restoreScroll) window.__restoreScroll();
 };
 </script>"""
@@ -919,7 +938,7 @@ def table_shell_html():
     """Ye hissa kabhi badalta nahi, isliye refresh par iframe reload nahi hota (Full Screen bana rehta hai)."""
     return (
         DARK_CSS + TABLE_CSS
-        + '<div id="oc" class="' + _wc() + '"><div class="bar"><button class="zb" id="tzo">－</button><button class="zb" id="tzi">＋</button><button class="zb" id="tfit">⤢ Fit</button><button id="fsbtn" onclick="toggleFS()">⛶ Full Screen</button></div>'
+        + '<div id="oc" class="' + _wc() + '"><div class="bar"><button class="zb" id="tcmp" title="Sirf OI / Volume / OI Chg">📊</button><button class="zb" id="tzo">－</button><button class="zb" id="tzi">＋</button><button class="zb" id="tfit">⤢ Fit</button><button id="fsbtn" onclick="toggleFS()">⛶ Full Screen</button></div>'
         + '<div class="wrap" id="wrap"><div style="padding:14px;color:#6b7280;font-size:13px;font-family:Arial">Option chain load ho raha hai…</div></div></div>'
         + FS_JS + SCROLL_JS + TABLE_UPDATE_JS
     )
@@ -3146,8 +3165,6 @@ def render_page():
             st.caption(f"📅 {chart_day:%d-%m-%Y} · {cur_past_t():%H:%M} tak (pichhla data)")
         st.session_state["chain_ctx"] = {"df": df, "spot": spot, "n": n_strikes, "inst": inst_name, "exp": expiry_date}
         render_table(df, spot, n_strikes, ana, show_summary, inst_name, min(140 + (2 * n_strikes + 2) * 50, 1100))
-        st.button("🔁" if st.session_state.get("oc_compact") else "📊", on_click=_toggle_compact, key="btn_oc_compact",
-                  help="Sirf OI / Volume / OI Chg (dobara dabane par full table)")
 
         # ---- Charts with Supply / Demand zones ----
         st.markdown("---")
