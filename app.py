@@ -163,10 +163,7 @@ else:
 
 st.title(f"📊 Veer Zone Pro · {inst_name}")
 st.caption("Live Option Chain & Zone Analytics")
-if hasattr(st, "fragment"):
-    st.fragment(run_every=0.5)(render_live_nifty_banner)()   # Nifty LIVE: har 0.5 second (WebSocket memory se padhta hai)
-else:
-    render_live_nifty_banner()
+_banner_slot = st.container()   # Nifty LIVE banner yahin dikhega (fragment niche define hone ke baad bharta hai)
 
 
 # ---------------- Expiry dates (auto) ----------------
@@ -3528,6 +3525,13 @@ def render_scanner():
 
 
 # Auto refresh: sirf data wala hissa dobara bante hai (fragment), poora page nahi, isliye screen smooth rehti hai
+with _banner_slot:
+    if hasattr(st, "fragment"):
+        st.fragment(run_every=0.5)(render_live_nifty_banner)()   # Nifty LIVE: har 0.5 second
+    else:
+        render_live_nifty_banner()
+
+
 if auto_refresh and hasattr(st, "fragment"):
     st.fragment(run_every=float(refresh_secs))(render_page)()
 elif st.session_state.get("play_on") and hasattr(st, "fragment"):
