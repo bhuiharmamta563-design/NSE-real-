@@ -2695,6 +2695,154 @@ def render_shift_section():
             st.caption(f"Shifting {sh['cut']} se {sh['asof']} tak. {sh['n_ok']}/{sh['n_all']} options ki history mili.")
 
 
+@st.cache_data(ttl=600)
+def paper_daily(inst_key, months):
+    """Paper log ke liye daily candles (cache 10 minute)."""
+    today = date.today()
+    return fetch_hist_range(inst_key, "day", today - timedelta(days=31 * months + 5), today)
+
+
+PAPER_RULES = {
+    "BOS UP → long": ("BOS UP", "long"),
+    "BOS DOWN → short": ("BOS DOWN", "short"),
+    "CHoCH UP → long": ("CHoCH UP", "long"),
+    "CHoCH DOWN → short": ("CHoCH DOWN", "short"),
+}
+
+
+def paper_simulate(d, events, want, direction, hold, tp_pct, sl_pct):
+    """Har event par close par hypothetical entry; aage 'hold' din mein stop ya target jo pehle lage."""
+    d = d.reset_index(drop=True)
+    h_ = d["high"].astype(float).values
+    l_ = d["low"].astype(float).values
+    c_ = d["close"].astype(float).values
+    dates = pd.to_datetime(d["time"]).dt.date.values
+    n = len(d)
+    rows = []
+    for ts, kind, _px in events:
+        if not str(kind).startswith(want):
+            continue
+        day = pd.Timestamp(ts).date()
+        hit = [k for k in range(n) if dates[k] == day]
+        if not hit:
+            continue
+        i0 = hit[0]
+        last = min(i0 + int(hold), n - 1)
+        if last <= i0:
+            continue
+        entry = float(c_[i0])
+        if direction == "long":
+            stop, tgt = entry * (1 - sl_pct / 100), entry * (1 + tp_pct / 100)
+        else:
+            stop, tgt = entry * (1 + sl_pct / 100), entry * (1 - tp_pct / 100)
+        exit_px, why, exit_idx = None, None, None
+        for j in range(i0 + 1, last + 1):
+            if direction == "long":
+                if l_[j] <= stop:
+                    exit_px, why, exit_idx = stop, "stop", j
+                    break
+                if h_[j] >= tgt:
+                    exit_px, why, exit_idx = tgt, "target", j
+                    break
+            else:
+                if h_[j] >= stop:
+                    exit_px, why, exit_idx = stop, "stop", j
+                    break
+                if l_[j] <= tgt:
+                    exit_px, why, exit_idx = tgt, "target", j
+                    break
+        if exit_px is None:
+            exit_px, why, exit_idx = float(c_[last]), "time", last
+        pnl = (exit_px / entry - 1) * 100 if direction == "long" else (entry / exit_px - 1) * 100
+        rows.append({
+            "Signal date": pd.Timestamp(ts).strftime("%d-%m-%Y"),
+            "Entry (close)": round(entry, 2),
+            "Exit date": pd.Timestamp(dates[exit_idx]).strftime("%d-%m-%Y"),
+            "Exit": round(exit_px, 2),
+            "Kaise nikla": why,
+            "PnL %": round(pnl, 2),
+            "Reason": f"{kind}: close {entry:,.2f} par structure toota ({direction})",
+        })
+    return rows
+
+
+OC_RULES = {
+    "Support touch → long": ("OC SUPPORT TOUCH", "long", "sup"),
+    "Resistance touch → short": ("OC RESISTANCE TOUCH", "short", "res"),
+}
+
+
+def oc_touch_events(d, level, label, hold):
+    """Jis din price ne level ko chhua (high-low mein), wahan event. Do event ke beech 'hold' din ka gap."""
+    d = d.reset_index(drop=True)
+    h_ = d["high"].astype(float).values
+    l_ = d["low"].astype(float).values
+    c_ = d["close"].astype(float).values
+    tm = d["time"]
+    out, last = [], None
+    for i in range(len(d)):
+        if level is None or not (l_[i] <= level <= h_[i]):
+            continue
+        if last is not None and i - last < int(hold):
+            continue
+        out.append((tm.iloc[i], label, float(c_[i])))
+        last = i
+    return out
+
+
+def render_paper_section():
+    st.markdown("---")
+    st.subheader("📒 Paper log: rule ka historical test")
+    st.caption("Ye asli order nahi hai. Har event par hypothetical entry (us din ka close) maan kar dekha jata hai ki "
+               "aage ke din target pehle lagta hai ya stop. Fees, slippage aur gap ka hisaab nahi hai. "
+               "Past result future ki guarantee nahi, aur ye trade ki salah nahi.")
+    src = st.radio("Level source", ["Candle structure", "Option chain (OI zone 1)"], horizontal=True, key="pp_src")
+    c1, c2, c3 = st.columns(3)
+    rule_opts = list(PAPER_RULES.keys()) if src == "Candle structure" else list(OC_RULES.keys())
+    rule = c1.selectbox("Rule", rule_opts, key="pp_rule")
+    months = c2.selectbox("Range", [1, 2, 4], index=1, format_func=lambda m_: f"{m_} mahina", key="pp_months")
+    hold = c3.number_input("Max din", min_value=1, max_value=30, value=5, step=1, key="pp_hold")
+    c4, c5 = st.columns(2)
+    tp = c4.number_input("Target %", min_value=0.1, max_value=20.0, value=2.0, step=0.1, key="pp_tp")
+    sl = c5.number_input("Stop %", min_value=0.1, max_value=20.0, value=1.0, step=0.1, key="pp_sl")
+    d = paper_daily(inst_key, months)
+    if d is None or d.empty:
+        st.warning("Daily candle data nahi mila. Token ya instrument check karein.")
+        return
+    if src == "Candle structure":
+        _z, _l, events = daily_structure(d, pivot=2, keep=4)
+        want, direction = PAPER_RULES[rule]
+    else:
+        lv = st.session_state.get("oc_levels") or {}
+        if not lv or lv.get("inst") != inst_name:
+            st.info("Option chain ka OI zone abhi nahi mila. Pehle option chain load hone dein, phir yahan levels aayenge.")
+            return
+        label, direction, lkey = OC_RULES[rule]
+        level = lv.get(lkey)
+        if level is None:
+            st.info("Is side par OI zone 1 nahi mila.")
+            return
+        st.caption(f"Level {level:,.0f} = aaj ke option chain ka OI zone 1. Ye aaj ke OI se bana hai, purane din ke OI se nahi, "
+                   "isliye ye approximate test hai (look-ahead bias ho sakta hai).")
+        events = oc_touch_events(d, float(level), label, hold)
+        want = label
+    rows = paper_simulate(d, events, want, direction, hold, tp, sl)
+    if not rows:
+        st.info("Is range mein is rule par koi trade nahi bana.")
+        return
+    tdf = pd.DataFrame(rows)
+    wins = int((tdf["PnL %"] > 0).sum())
+    n_tr = len(tdf)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Trades", n_tr)
+    m2.metric("Win rate", f"{wins / n_tr * 100:.0f}%")
+    m3.metric("Average PnL", f"{tdf['PnL %'].mean():+.2f}%")
+    m4.metric("Total (simple sum)", f"{tdf['PnL %'].sum():+.2f}%")
+    st.markdown(html_table(tdf.sort_values("Signal date", ascending=False), _dark()), unsafe_allow_html=True)
+    st.download_button("⬇️ Paper log CSV", tdf.to_csv(index=False).encode("utf-8"),
+                       file_name="paper_log.csv", mime="text/csv", key="dl_paper")
+
+
 def render_alert_panel():
     st.markdown("---")
     st.subheader("🔔 Price alerts")
@@ -2812,6 +2960,14 @@ def render_page():
         zp_state = st.session_state.get("zone_prev") or {}
         prev_z = zp_state.get("z") if (zp_state.get("inst") == inst_name and zp_state.get("exp") == expiry_date) else None
         ana = analyze(df, spot, zone_pts, prev_z)
+        try:
+            _dem = ana["zone_sets"]["oi"]["demand"]
+            _sup = ana["zone_sets"]["oi"]["supply"]
+            st.session_state["oc_levels"] = {"inst": inst_name, "exp": expiry_date,
+                                             "sup": float(_dem[0]["strike"]) if _dem else None,
+                                             "res": float(_sup[0]["strike"]) if _sup else None}
+        except Exception:
+            pass
         st.session_state["zone_prev"] = {
             "inst": inst_name, "exp": expiry_date,
             "z": {f"{b_}_{sd}": ana["zone_sets"][b_][sd][0]["strike"]
@@ -3379,3 +3535,6 @@ render_alert_panel()
 
 
 render_shift_section()
+
+
+render_paper_section()
