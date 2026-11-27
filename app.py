@@ -233,6 +233,7 @@ show_vol_zones = st.sidebar.checkbox("📊 Volume zones chart par dikhao", value
 show_oi_zones = st.sidebar.checkbox("📈 OI zones chart par dikhao", value=True)
 focus_mode = st.sidebar.checkbox("📺 Focus mode (sirf option chain)", value=False)
 chart_focus = st.sidebar.checkbox("📈 Charts Focus mode (sirf charts)", value=False)
+alert_sound_on = st.sidebar.checkbox("🔊 Alert par sound / vibration", value=True, key="alert_sound_on")
 auto_refresh = st.sidebar.checkbox("🔄 Auto refresh (smooth, screen wahin rahegi)", value=True)
 refresh_secs = 1
 if auto_refresh:
@@ -2630,6 +2631,19 @@ def scan_key_for(sym):
     return resolve_stock(sym)
 
 
+ALERT_SOUND_HTML = """<script>
+(function(){
+  try { if (navigator.vibrate) navigator.vibrate([250, 120, 250]); } catch(e) {}
+  try {
+    var A = new (window.AudioContext || window.webkitAudioContext)();
+    var o = A.createOscillator(), g = A.createGain();
+    o.frequency.value = 880; o.connect(g); g.connect(A.destination);
+    g.gain.value = 0.25; o.start(); o.stop(A.currentTime + 0.5);
+  } catch(e) {}
+})();
+</script>"""
+
+
 def _alert_list():
     return st.session_state.setdefault("alerts", [])
 
@@ -2656,6 +2670,11 @@ def render_alert_banner(spot, inst):
         dir_txt = "upar" if a["dir"] == "up" else "neeche"
         if hit:
             st.warning(f"🔔 {a['name']} ({a['level']:,.2f}) {dir_txt} hit ho gaya. LTP {spot:,.2f}")
+            _fired = st.session_state.setdefault("alert_fired", set())
+            if a["id"] not in _fired:                 # har alert par sirf ek baar
+                _fired.add(a["id"])
+                if st.session_state.get("alert_sound_on", True):
+                    components.html(ALERT_SOUND_HTML, height=0)
         elif near:
             st.info(f"⚠️ {a['name']} ({a['level']:,.2f}) ke paas hai. LTP {spot:,.2f}, {a['tol']}% ke andar")
 
@@ -2948,8 +2967,41 @@ def render_live_nifty_banner():
                    + (f" · error={stt['last_error']}" if stt['last_error'] else ""))
 
 
+def live_option_overlay(df, spot, n):
+    """Option window ke keys WebSocket par 'full' mode mein; sab keys ka data aane par hi table mein live values lagti hain."""
+    try:
+        fc = get_nifty_feed()
+    except Exception:
+        return df, "live option: feed off (REST values)"
+    d = df.sort_values("Strike").reset_index(drop=True)
+    ai = int((d["Strike"] - spot).abs().idxmin())
+    win = d.iloc[max(ai - n, 0): ai + n + 1]
+    keys = [k for k in list(win["Call Key"]) + list(win["Put Key"]) if isinstance(k, str) and k]
+    if not keys:
+        return df, "live option: keys nahi mile (REST values)"
+    fc.subscribe(keys)
+    snap = fc.latest()
+    got = [k for k in keys if snap.get(k) and snap[k].get("vtt") is not None]
+    if len(got) < len(keys):
+        return df, f"live option: {len(got)}/{len(keys)} keys aaye, REST values use ho rahi hain"
+    out = df.copy()
+    for idx in out.index:
+        for side in ("Call", "Put"):
+            k = out.at[idx, f"{side} Key"]
+            if isinstance(k, str) and snap.get(k) and snap[k].get("vtt") is not None:
+                v = snap[k]
+                out.at[idx, f"{side} LTP"] = v["ltp"]
+                out.at[idx, f"{side} Vol"] = v["vtt"]
+                out.at[idx, f"{side} OI"] = v["oi"]
+                out.at[idx, f"{side} IV"] = v["iv"]
+    return out, f"live option: {len(got)}/{len(keys)} keys (WebSocket, OI Chg REST se)"
+
+
 def render_page():
     df, spot = fetch_option_chain(inst_key, expiry_date)
+    if not df.empty and chart_day == date.today():
+        df, _ov_msg = live_option_overlay(df, spot, n_strikes)
+        st.caption(_ov_msg)
     if not df.empty and spot:
         render_alert_banner(spot, inst_name)
     is_past = chart_day != date.today()
