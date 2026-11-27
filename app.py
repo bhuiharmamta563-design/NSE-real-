@@ -355,11 +355,19 @@ def analyze(df, spot, zone_pts=0.0, prev=None):
             atm_k = float(d.loc[(d["Strike"] - spot).abs().idxmin(), "Strike"])   # ATM strike (spot ke sabse paas)
             if side == "supply":                                     # resistance: ATM se upar 10 strike tak
                 near = pool[(pool["Strike"] >= atm_k) & (pool["Strike"] <= atm_k + NEAR_K * step)]
-            else:                                                    # support: ATM se neeche 10 strike tak
-                near = pool[(pool["Strike"] <= atm_k) & (pool["Strike"] >= atm_k - NEAR_K * step)]
+            else:                                                    # support: ATM se neeche 10 strike tak, aur ATM se ek strike upar bhi
+                near = pool[(pool["Strike"] <= atm_k + step) & (pool["Strike"] >= atm_k - NEAR_K * step)]
             if near.empty:
                 near = pool
             i1 = near[col].idxmax()                                  # Zone 1: market price ke paas ka sabse zyada
+            # Naya rule: ATM ke 3 strike ke andar (us side par) jo strike 75%+ mazboot ho, wahi sabse paas wala zone 1
+            _near_rule = False
+            if side == "demand":                                     # Support: ATM ke 3 strike ke andar (dono taraf), 75%+ wala sabse paas
+                _side_pool = near[(near["Strike"] - atm_k).abs() <= 3 * step]
+                _strong = _side_pool[_side_pool[col] >= 0.75 * colmax[col]] if len(_side_pool) else _side_pool
+                _near_rule = not _strong.empty
+                if _near_rule:
+                    i1 = (_strong["Strike"] - atm_k).abs().idxmin()
             _srt = near.sort_values(col, ascending=False)
             _sec = None
             if len(_srt) > 1:
@@ -369,7 +377,7 @@ def analyze(df, spot, zone_pts=0.0, prev=None):
                     _sec = {"strike": fs(float(_r2["Strike"])), "pct": _p2}
             second_store[(basis, side)] = _sec
             kp = (prev or {}).get(f"{basis}_{side}")                 # HOLD: pichla zone tab tak rahe jab tak naya 15%+ zyada mazboot na ho
-            if kp is not None:
+            if kp is not None and not _near_rule:
                 rp = near[near["Strike"] == kp]
                 if not rp.empty and float(rp[col].iloc[0]) >= 0.85 * float(near[col].max()):
                     i1 = rp.index[0]
