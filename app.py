@@ -696,8 +696,10 @@ def shift_header_html(sh, side):
     return '<div class="sh">' + "<br>".join(lines) + "</div>"
 
 
-def build_table_body(df, spot, n, ana=None, show_summary=True, inst_label="SPOT", shift=None, marks=None, vm_txt=None):
+def build_table_body(df, spot, n, ana=None, show_summary=True, inst_label="SPOT", shift=None, marks=None, vm_txt=None, compact=False):
     marks = marks or {}
+    if compact:                       # sirf OI / Volume / OI Chg: summary (zone, PCR) bhi band
+        show_summary = False
     mx = {k: max(float(df[k].max()), 1.0) for k in ["Call OI", "Put OI", "Call Vol", "Put Vol"]}
     d = df.sort_values("Strike").reset_index(drop=True)
     atm_idx = int((d["Strike"] - spot).abs().idxmin())
@@ -720,7 +722,7 @@ def build_table_body(df, spot, n, ana=None, show_summary=True, inst_label="SPOT"
         tags.setdefault(ana["max_pain"], []).append('<span class="chip m">🎯 MAX PAIN</span>')
 
     ITM, NORM = "#fff7cc", "#ffffff"
-    ncols = 13 if show_summary else 11
+    ncols = 7 if compact else (13 if show_summary else 11)
     rows, spot_done = [], False
     spot_row = (
         f'<tr class="spotrow"><td colspan="{ncols}">▶▶ {inst_label} SPOT {spot:,.2f}' + (f' · {vm_txt}' if vm_txt else '') + ' (market yahan chal raha hai) ◀◀</td></tr>'
@@ -751,8 +753,8 @@ def build_table_body(df, spot, n, ana=None, show_summary=True, inst_label="SPOT"
         rows.append(
             f'<tr class="{"atm" if is_atm else ""}">'
             # CALLS: IV | LTP | OI Chg | OI | Volume  (Volume strike ke paas)
-            + plain_cell(_iv_txt(r["Call IV"]), cbg)
-            + ltp_cell(r["Call LTP"], cbg, True, s, spot)
+            + ("" if compact else plain_cell(_iv_txt(r["Call IV"]), cbg))
+            + ("" if compact else ltp_cell(r["Call LTP"], cbg, True, s, spot))
             + chg_cell(r["Call OI Chg"], cbg)
             + bar_cell(f'{r["Call OI"] / 1e5:.1f}', r["Call OI"] / mx["Call OI"] * 100, cbg, "rgba(248,113,113,.55)", "to left", "red")
             + bar_cell(fmt_vol(r["Call Vol"]), r["Call Vol"] / mx["Call Vol"] * 100, cbg, "rgba(251,146,60,.35)", "to left", "red")
@@ -764,10 +766,10 @@ def build_table_body(df, spot, n, ana=None, show_summary=True, inst_label="SPOT"
             + bar_cell(fmt_vol(r["Put Vol"]), r["Put Vol"] / mx["Put Vol"] * 100, pbg, "rgba(96,165,250,.35)", "to right", "green")
             + bar_cell(f'{r["Put OI"] / 1e5:.1f}', r["Put OI"] / mx["Put OI"] * 100, pbg, "rgba(74,222,128,.6)", "to right", "green")
             + chg_cell(r["Put OI Chg"], pbg)
-            + ltp_cell(r["Put LTP"], pbg, False, s, spot)
+            + ("" if compact else ltp_cell(r["Put LTP"], pbg, False, s, spot))
             + zone_td
             + pcr_td
-            + plain_cell(_iv_txt(r["Put IV"]), pbg)
+            + ("" if compact else plain_cell(_iv_txt(r["Put IV"]), pbg))
             + "</tr>"
         )
     if not spot_done:
@@ -775,23 +777,28 @@ def build_table_body(df, spot, n, ana=None, show_summary=True, inst_label="SPOT"
 
 
     put_cols = 7 if show_summary else 5
+    call_cols = 3 if compact else 5
     if shift:
         mid = f'<th class="shmid">🔀 {shift["cut"]} → {shift["asof"]}</th>'
         head1 = (
-            f'<tr><th colspan="5" class="calls">CALLS{shift_header_html(shift, "Call")}</th>{mid}'
+            f'<tr><th colspan="{call_cols}" class="calls">CALLS{shift_header_html(shift, "Call")}</th>{mid}'
             f'<th colspan="{put_cols}" class="puts">PUTS{shift_header_html(shift, "Put")}</th></tr>'
         )
     else:
         head1 = (
-            '<tr><th colspan="5" class="calls">CALLS</th><th></th>'
+            f'<tr><th colspan="{call_cols}" class="calls">CALLS</th><th></th>'
             f'<th colspan="{put_cols}" class="puts">PUTS</th></tr>'
         )
-    head2 = "<tr><th>IV</th><th>LTP</th><th>OI Chg (L)</th><th>OI (L)</th><th>Volume</th><th>Strike</th>"
-    head2 += "<th>Volume</th><th>OI (L)</th><th>OI Chg (L)</th><th>LTP</th>"
-    if show_summary:
-        head2 += "<th>Zone</th><th>PCR</th>"
-    head2 += "<th>IV</th></tr>"
-    minw = 1150 if show_summary else 950
+    if compact:
+        head2 = "<tr><th>OI Chg (L)</th><th>OI (L)</th><th>Volume</th><th>Strike</th><th>Volume</th><th>OI (L)</th><th>OI Chg (L)</th></tr>"
+        minw = 520
+    else:
+        head2 = "<tr><th>IV</th><th>LTP</th><th>OI Chg (L)</th><th>OI (L)</th><th>Volume</th><th>Strike</th>"
+        head2 += "<th>Volume</th><th>OI (L)</th><th>OI Chg (L)</th><th>LTP</th>"
+        if show_summary:
+            head2 += "<th>Zone</th><th>PCR</th>"
+        head2 += "<th>IV</th></tr>"
+        minw = 1150 if show_summary else 950
 
     return f'<table style="min-width:{minw}px">{head1}{head2}{"".join(rows)}</table>'
 
@@ -2502,7 +2509,7 @@ def render_table(df, spot, n, ana, show_summary, label, height):
     _iv = iv_max_info(df, spot, n)
     if _iv:
         vm_txt = " · ".join(x for x in [vm_txt, f"IV max {fs(_iv['strike'])} ({_iv['iv']:.1f}%)"] if x)
-    components.html(push_html("table", {"html": build_table_body(df, spot, n, ana, show_summary, label, current_shift(), zone_marks(ana, df, spot), vm_txt)}), height=0)
+    components.html(push_html("table", {"html": build_table_body(df, spot, n, ana, show_summary, label, current_shift(), zone_marks(ana, df, spot), vm_txt, compact=st.session_state.get("oc_compact", False))}), height=0)
 
 
 def render_charts(df, spot, ana, n_strikes, height=440):
@@ -2600,6 +2607,10 @@ def _shift_past(delta):
     lo_ = datetime.combine(date.today(), dt_time(9, 15))
     hi_ = datetime.combine(date.today(), dt_time(15, 30))
     st.session_state["past_t"] = min(max(base, lo_), hi_).time()
+
+
+def _toggle_compact():
+    st.session_state["oc_compact"] = not st.session_state.get("oc_compact", False)
 
 
 def _toggle_play():
@@ -3135,6 +3146,8 @@ def render_page():
             st.caption(f"📅 {chart_day:%d-%m-%Y} · {cur_past_t():%H:%M} tak (pichhla data)")
         st.session_state["chain_ctx"] = {"df": df, "spot": spot, "n": n_strikes, "inst": inst_name, "exp": expiry_date}
         render_table(df, spot, n_strikes, ana, show_summary, inst_name, min(140 + (2 * n_strikes + 2) * 50, 1100))
+        st.button("🔁" if st.session_state.get("oc_compact") else "📊", on_click=_toggle_compact, key="btn_oc_compact",
+                  help="Sirf OI / Volume / OI Chg (dobara dabane par full table)")
 
         # ---- Charts with Supply / Demand zones ----
         st.markdown("---")
