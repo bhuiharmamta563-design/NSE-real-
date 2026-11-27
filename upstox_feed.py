@@ -48,7 +48,10 @@ def _build_pool():
     msg("IndexFullFeed", [_field("ltpc", 1, M.TYPE_MESSAGE, _OPT, "LTPC"),
                           _field("marketOHLC", 2, M.TYPE_MESSAGE, _OPT, "MarketOHLC")])
     # MarketFullFeed: sirf ltpc (field 1) chahiye; baaki fields parser ignore karega
-    msg("MarketFullFeed", [_field("ltpc", 1, M.TYPE_MESSAGE, _OPT, "LTPC")])
+    msg("MarketFullFeed", [
+        _field("ltpc", 1, M.TYPE_MESSAGE, _OPT, "LTPC"),
+        _field("vtt", 6, M.TYPE_INT64), _field("oi", 7, M.TYPE_DOUBLE), _field("iv", 8, M.TYPE_DOUBLE),
+    ])
     msg("FullFeed", [
         _field("marketFF", 1, M.TYPE_MESSAGE, _OPT, "MarketFullFeed", oneof=0),
         _field("indexFF", 2, M.TYPE_MESSAGE, _OPT, "IndexFullFeed", oneof=0),
@@ -107,7 +110,11 @@ def parse_frame(raw: bytes) -> dict:
             l = feed.firstLevelWithGreeks.ltpc
         else:
             continue
-        feeds[key] = {"ltp": l.ltp, "cp": l.cp, "ltt": l.ltt, "ltq": l.ltq}
+        entry = {"ltp": l.ltp, "cp": l.cp, "ltt": l.ltt, "ltq": l.ltq, "vtt": None, "oi": None, "iv": None}
+        if feed.HasField("fullFeed") and feed.fullFeed.HasField("marketFF"):
+            mff = feed.fullFeed.marketFF
+            entry.update({"vtt": mff.vtt, "oi": mff.oi, "iv": mff.iv})
+        feeds[key] = entry
     return {"type": msg.type, "ts": msg.currentTs, "feeds": feeds}
 
 
@@ -134,6 +141,9 @@ class FeedClient:
         self.last_event = "start"
         self.msg_count = 0
         self.last_msg_at = None
+        self._ws = None
+        self._extra_keys = set()
+        self._sub_lock = threading.Lock()
         threading.Thread(target=self._run, daemon=True).start()
 
     def status(self):
@@ -167,6 +177,28 @@ class FeedClient:
                "data": {"mode": self._mode, "instrumentKeys": self._keys}}
         import websocket
         ws.send(json.dumps(sub).encode("utf-8"), opcode=websocket.ABNF.OPCODE_BINARY)
+        self._ws = ws
+        if self._extra_keys:
+            self._send_sub(ws, sorted(self._extra_keys), "full")
+
+    def _send_sub(self, ws, keys, mode):
+        import websocket
+        sub = {"guid": "veer-zone-options", "method": "sub", "data": {"mode": mode, "instrumentKeys": list(keys)}}
+        ws.send(json.dumps(sub).encode("utf-8"), opcode=websocket.ABNF.OPCODE_BINARY)
+
+    def subscribe(self, keys):
+        """Option strikes 'full' mode mein subscribe karo (sirf naye keys). Connection na ho to _on_open par bhej diye jayenge."""
+        new = [k for k in keys if k and k not in self._extra_keys]
+        if not new:
+            return
+        with self._sub_lock:
+            self._extra_keys.update(new)
+            ws = self._ws
+            if ws is not None and self.connected:
+                try:
+                    self._send_sub(ws, new, "full")
+                except Exception as e:
+                    self.last_error = f"subscribe: {str(e)[:120]}"
 
     def _on_message(self, ws, message):
         self.msg_count += 1
@@ -180,7 +212,13 @@ class FeedClient:
             self.last_error = f"decode: {e}"
             return
         with self._lock:
-            self._latest.update(data["feeds"])
+            for k, v in data["feeds"].items():
+                prev = self._latest.get(k, {})
+                merged = dict(v)
+                for kk in ("vtt", "oi", "iv"):          # ltpc-only frame purana full data na mitaye
+                    if merged.get(kk) is None and prev.get(kk) is not None:
+                        merged[kk] = prev[kk]
+                self._latest[k] = merged
 
     def _on_error(self, ws, error):
         self.last_error = str(error)[:200]
