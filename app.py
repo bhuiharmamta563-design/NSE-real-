@@ -2908,7 +2908,7 @@ FEED_NIFTY_KEY = "NSE_INDEX|Nifty 50"
 
 
 @st.cache_resource
-def get_nifty_feed():
+def get_nifty_feed_v2():
     """Ek hi WebSocket connection (app ke saath). Authorize URL analytics token (ya access token) se."""
     try:
         tok = st.secrets.get("UPSTOX_ANALYTICS_TOKEN") or ACCESS_TOKEN
@@ -2938,7 +2938,7 @@ def _has_secret(name):
 def render_live_nifty_banner():
     """Phase 1: Nifty ka live LTP aur din ka change %."""
     try:
-        fc = get_nifty_feed()
+        fc = get_nifty_feed_v2()
     except Exception as e:
         st.caption(f"🔴 Live feed start nahi hua: {str(e)[:140]}")
         return
@@ -2970,7 +2970,7 @@ def render_live_nifty_banner():
 def live_option_overlay(df, spot, n):
     """Option window ke keys WebSocket par 'full' mode mein; sab keys ka data aane par hi table mein live values lagti hain."""
     try:
-        fc = get_nifty_feed()
+        fc = get_nifty_feed_v2()
     except Exception:
         return df, "live option: feed off (REST values)"
     d = df.sort_values("Strike").reset_index(drop=True)
